@@ -78,6 +78,9 @@ def _load_aliases() -> dict[str, tuple[str, ...]]:
 
 
 TARGET_COLUMNS, TARGET_DESCRIPTIONS = _load_target_schema()
+# Output metadata owned by the unknown-data cleaner. It is intentionally not
+# part of TEMPLATE_COLUMNS, which remains shared with the legacy formatter.
+SOURCE_COLUMN = "Source"
 ALIASES = _load_aliases()
 OLLAMA_SYSTEM_PROMPT = _read_text("ollama_system_prompt.txt")
 OLLAMA_USER_PROMPT = _read_text("ollama_user_prompt.txt")

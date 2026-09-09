@@ -11,10 +11,12 @@ from process import media_cleaner as clean_media_data
 
 def main():
     st.title('🧹 未清理資料格式化')
-    st.markdown("#### **自動偵測未知 Excel 報表的表頭，並對應到系統標準欄位。**")
+    st.markdown("#### **從不固定版面的 Excel 找出日期資料表，產生標準格式化數據。**")
     st.info(
-        '可一次上傳多個 XLSX 檔案，並為每個檔案勾選要清整的工作表；'
-        '完成後可下載格式化檔案與稽核報告；整欄無值的標準欄位不會輸出。'
+        '可一次上傳多個 XLSX / XLS 檔案，並為每個檔案勾選要清整的工作表；'
+        '支援同一工作表內左右並排、上下堆疊的多個資料表，並自動填滿合併儲存格。'
+        '只保留具有有效日期的資料，排除彙總列與彙總欄。能對應的欄位使用系統標準名稱；'
+        '無法對應的欄位保留原名稱與資料，並加入 Source 欄標示來源 Excel。'
     )
 
     default_dictionary = (
@@ -23,7 +25,7 @@ def main():
     )
     uploaded_files = st.file_uploader(
         "上傳未清理的媒體 Excel 檔案",
-        type=["xlsx"],
+        type=["xlsx", "xls"],
         accept_multiple_files=True,
         key="uncleaned_media_files",
     )
@@ -34,7 +36,7 @@ def main():
         st.subheader("選擇要清整的工作表")
         st.caption(
             "每個檔案預設只勾選第一張；如果還有其他資料表，請再手動勾選。"
-            "程式會對每張工作表獨立偵測表頭與欄位。"
+            "程式會對每張工作表的各個資料區塊獨立偵測、清理與稽核。"
         )
         for index, uploaded_file in enumerate(uploaded_files, start=1):
             workbook_data = uploaded_file.getvalue()
@@ -54,11 +56,16 @@ def main():
 
     with st.expander("⚙️ 進階設定"):
         scan_rows = st.number_input(
-            "每張工作表最多掃描幾列尋找表頭",
-            min_value=1,
-            max_value=1000,
-            value=100,
-            step=10,
+            "表頭搜尋列數（0 表示整張工作表）",
+            min_value=0,
+            value=0,
+            step=100,
+            help="預設搜尋整張工作表，避免漏掉下方資料表；正數只限制表頭搜尋，不限制資料列數。",
+        )
+        default_year = st.number_input(
+            "缺少年份的日期使用哪一年（0 表示僅依報表內容判斷）",
+            min_value=0, max_value=2100, value=0, step=1,
+            help="例如文字 7月28日。完整日期不受影響；無法確認年份的列會排除並列入稽核。",
         )
         dictionary_file = st.file_uploader(
             "自訂欄位字典（選填，XLSX）",
@@ -81,12 +88,12 @@ def main():
         else:
             st.warning("找不到預設欄位字典範本，請聯絡系統管理者。")
         use_ollama = st.checkbox(
-            "使用本機 Ollama 協助辨識表頭",
+            "使用本機 Ollama 辨識並列表格數量與陌生欄位",
             value=True,
-            help="Ollama 無法連線時，會自動改用原本的規則判別。",
+            help="找到日期表頭後，會將完整橫列、欄座標及附近樣本送到 Ollama，確認其他表格與共用日期，再辨識陌生欄位。提案未通過驗證時會使用規則並記錄原因。",
         )
         if use_ollama:
-            ollama_model = st.text_input("Ollama 模型", value="qwen3.5:9b")
+            ollama_model = st.text_input("Ollama 模型", value="qwen3.5:2b")
             ollama_url = st.text_input(
                 "Ollama API 網址", value="http://127.0.0.1:11434"
             )
@@ -98,13 +105,15 @@ def main():
                 step=5.0,
             )
         else:
-            ollama_model = "qwen3.5:9b"
+            ollama_model = "qwen3.5:2b"
             ollama_url = "http://127.0.0.1:11434"
             ollama_timeout = 120.0
 
     if st.button("開始格式化", type="primary", key="clean_uncleaned_media"):
         if not uploaded_files:
-            st.error("請先上傳至少一個 XLSX 檔案。")
+            st.error("請先上傳至少一個 XLSX / XLS 檔案。")
+        elif default_year and default_year < 1900:
+            st.error("請將年份設為 0，或輸入 1900–2100 之間的年份。")
         elif sheet_read_errors:
             st.error("有檔案無法讀取工作表，請確認檔案內容後再試。")
         elif any(
@@ -146,6 +155,9 @@ def main():
                         url=ollama_url,
                         timeout=float(ollama_timeout),
                         enabled=use_ollama,
+                        # Temporary diagnostic mode requested for tracing every
+                        # dated table through Ollama, even after another request fails.
+                        force_all=use_ollama,
                     )
                     all_audit = []
                     cleaned_files = []
@@ -174,6 +186,7 @@ def main():
                                 scan_rows=int(scan_rows),
                                 sheet_names=selected_sheets_by_file[index],
                                 ollama=ollama,
+                                default_year=int(default_year) or None,
                             )
                         except Exception as exc:
                             audit = [
@@ -241,12 +254,20 @@ def main():
                             {
                                 "檔案": record.input_file,
                                 "工作表": record.sheet,
+                                "區塊": record.block_id,
+                                "來源範圍": record.source_range,
+                                "日期來源": record.date_source_range,
+                                "辨識方式": record.detection_method,
                                 "表頭列": record.header_row,
                                 "狀態": record.status,
-                                "分數": record.score,
+                                "欄位對應率": record.score,
                                 "有效資料列": record.data_rows,
                                 "欄位對應": record.mapped_columns,
-                                "未對應欄位": record.unmapped_columns,
+                                "未對應欄位（已保留）": record.unmapped_columns,
+                                "排除欄位": record.excluded_columns,
+                                "略過資料列": record.skipped_rows,
+                                "提醒": record.warnings,
+                                "已展開合併範圍": record.merged_ranges,
                             }
                             for record in all_audit
                         ],
@@ -271,7 +292,8 @@ def main():
         {
             key: (
                 "、".join(value)
-                if key == "未對應欄位" and isinstance(value, list)
+                if isinstance(value, list)
+                else str(value) if isinstance(value, dict)
                 else value
             )
             for key, value in record.items()
@@ -284,7 +306,7 @@ def main():
     for record in results["audit"]:
         if record["欄位對應"]:
             with st.expander(
-                f"欄位對應：{record['檔案']} / {record['工作表']}"
+                f"欄位對應：{record['檔案']} / {record['工作表']} / {record.get('區塊', '')} {record.get('來源範圍', '')}"
             ):
                 st.json(record["欄位對應"])
 
@@ -300,7 +322,8 @@ def main():
                 type="primary",
             )
             st.caption(
-                "內含 cleaned_data、cleaning_audit、unmapped_columns 三張工作表。"
+                "內含 cleaned_data、cleaning_audit、unmapped_columns 三張工作表；"
+                "未對應欄位仍會保留在 cleaned_data，unmapped_columns 用於檢查欄位判別結果。"
             )
         else:
             st.info("目前是更新前的舊結果；請重新執行格式化以產生匯總 Excel。")
@@ -332,7 +355,7 @@ def main():
             )
         with unmapped_col:
             st.download_button(
-                "下載未對應欄位（CSV）",
+                "下載未對應欄位清單（欄位已保留於結果）",
                 data=results["unmapped_csv"],
                 file_name="unmapped_columns.csv",
                 mime="text/csv",

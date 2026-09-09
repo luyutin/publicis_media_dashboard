@@ -73,7 +73,12 @@ class MediaCleanerStructureTests(unittest.TestCase):
                 cleaned.close()
             self.assertEqual(
                 list(rows[0]),
-                ["Date", "Campaign name", "Impressions"],
+                ["Date", "Campaign name", "Impressions", "Source"],
+            )
+            source_index = rows[0].index("Source")
+            self.assertEqual(
+                [row[source_index] for row in rows[1:]],
+                ["vendor_report.xlsx", "vendor_report.xlsx"],
             )
             campaign_index = rows[0].index("Campaign name")
             self.assertEqual(
@@ -117,9 +122,9 @@ class MediaCleanerStructureTests(unittest.TestCase):
                 cleaned.close()
             self.assertEqual(
                 headers,
-                ["Date", "User number", "New user", "Working session", "Bounce Rate"],
+                ["Date", "User number", "New user", "Working session", "Bounce Rate", "Source", "備註"],
             )
-            self.assertTrue(set(headers).issubset(TEMPLATE_COLUMNS))
+            self.assertEqual(headers[-2:], ["Source", "備註"])
 
     def test_horizontal_total_rows_are_excluded(self):
         workbook = Workbook()
@@ -196,7 +201,7 @@ class MediaCleanerStructureTests(unittest.TestCase):
                 headers = [cell.value for cell in cleaned["cleaned_data"][1]]
             finally:
                 cleaned.close()
-            self.assertEqual(headers, TEMPLATE_COLUMNS)
+            self.assertEqual(headers, TEMPLATE_COLUMNS + ["Source"])
 
     def test_consolidated_workbook_contains_data_and_audit_sheets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -272,6 +277,44 @@ class MediaCleanerStructureTests(unittest.TestCase):
                 self.assertEqual(unmapped_rows[1][-1], "備註")
             finally:
                 result.close()
+
+    def test_consolidation_keeps_source_and_union_of_original_columns(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cleaned_paths = []
+            audits = []
+            for name, unknown, value in (("alpha.xlsx", "Vendor A", 10), ("beta.xlsx", "Vendor B", 20)):
+                workbook = Workbook()
+                workbook.active.append(["Date", "Impressions", unknown])
+                workbook.active.append(["2025-01-01", 100, value])
+                input_path = root / name
+                output_path = root / f"{Path(name).stem}_cleaned.xlsx"
+                workbook.save(input_path)
+                workbook.close()
+                records, count = media_cleaner.clean_workbook_sheets(
+                    input_path=input_path,
+                    output_path=output_path,
+                    aliases=media_cleaner.read_dictionary(None),
+                    scan_rows=0,
+                    sheet_names=["Sheet"],
+                    ollama=media_cleaner.OllamaConfig(enabled=False),
+                )
+                self.assertEqual(count, 1)
+                audits.extend(records)
+                cleaned_paths.append(output_path)
+
+            consolidated = root / "combined.xlsx"
+            media_cleaner.consolidate_cleaned_workbooks(cleaned_paths, audits, consolidated)
+            workbook = load_workbook(consolidated, data_only=True, read_only=True)
+            try:
+                rows = list(workbook["cleaned_data"].values)
+            finally:
+                workbook.close()
+            self.assertEqual(list(rows[0]), ["Date", "Impressions", "Source", "Vendor A", "Vendor B"])
+            source_index = rows[0].index("Source")
+            self.assertEqual([row[source_index] for row in rows[1:]], ["alpha.xlsx", "beta.xlsx"])
+            self.assertEqual(rows[1][-2:], (10, None))
+            self.assertEqual(rows[2][-2:], (None, 20))
 
 
 if __name__ == "__main__":

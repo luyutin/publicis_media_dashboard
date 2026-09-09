@@ -1,6 +1,6 @@
 """Public API for unknown media-workbook cleaning."""
 
-from .settings import ALIASES, TARGET_COLUMNS, TARGET_DESCRIPTIONS
+from .settings import ALIASES, SOURCE_COLUMN, TARGET_COLUMNS, TARGET_DESCRIPTIONS
 from .engine import (
     AuditRecord,
     Candidate,
@@ -20,6 +20,7 @@ __all__ = [
     "AuditRecord",
     "Candidate",
     "OllamaConfig",
+    "SOURCE_COLUMN",
     "TARGET_COLUMNS",
     "TARGET_DESCRIPTIONS",
     "clean_workbook",

@@ -71,20 +71,65 @@ and legacy project copies are intentionally excluded from Git.
 The cleaner is a package under `process/media_cleaner/`. Its Python API is in
 `engine.py`; editable aliases, field descriptions, and Ollama prompts are under
 `process/media_cleaner/config/`. The canonical field names and order come from
-`process/template.py::template()`. Completely empty columns are omitted from
-each output workbook. Restart Streamlit after changing these text files.
+`process/template_schema.py::TEMPLATE_COLUMNS` (shared with the old formatter).
+Every retained dated row also contains `Source`, whose value is the original Excel
+filename. Source columns mapped by aliases or the LLM use their canonical template
+names. Every other non-total source column is preserved with its original header
+after `Source`, including declared columns whose values are all blank. Duplicate
+original headers receive an Excel-column suffix so their values cannot overwrite
+one another. Restart Streamlit after changing the configuration files.
 
 On the Streamlit page, each uploaded workbook shows its worksheet names. Only
 the first worksheet is selected by default; users can explicitly include more.
-Selected worksheets are detected and audited independently, then merged into
-the workbook's cleaned output. Source file and worksheet remain traceable in
-the audit worksheets.
+Each selected XLSX or XLS worksheet may contain multiple tables. Actual merged
+cells are expanded in memory; unrelated blank cells are not forward-filled.
+Only dated records are exported. Total rows, total columns, aggregate column
+groups, and non-date demographic tables are excluded and audited.
+
+The pipeline is split into `workbooks.py` (XLS/XLSX input), `grid.py` (merge
+expansion), `detection.py` (rule-based header seeds and fallback), `structure.py`
+(LLM table discovery across a complete header row), `mapping.py` (aliases and
+LLM field semantics), `extraction.py` (date validation), and `output.py` (Excel
+exports). `engine.py` orchestrates these steps. It does not invoke the old
+customer-specific formatters or write their ROI session state.
+
+With Ollama enabled, finding one dated seed triggers a full-width row request,
+including absolute coordinates, nearby samples, and merge ranges. The model can
+return more tables than the seeds, different table widths/metric orders, and a
+shared date column anywhere on the row. Proposals must cover the source columns,
+reference real cells, avoid duplicate metric extraction, and have date evidence.
+Invalid proposals get one correction attempt, then fall back with an audit warning.
+Unknown field mapping is a separate model step. Raw model confidence is not a
+guarantee that a table is correct.
+
+The default header scan covers the entire sheet (`--scan-rows 0`); lower stacked
+tables are discovered by continuing the rule scan. A missing year is resolved only
+from local evidence or `--default-year`, never from the current date. Audits include
+source range, date source, merged ranges, skipped rows, mapping method, warnings,
+and output row intervals. The displayed mapping ratio is field coverage, not an
+accuracy/confidence score.
+
+Limits: a discoverable seed is still needed; complex layouts without one may be
+missed. Rule-only fallback has narrower layout support. Unfamiliar metrics without
+a corresponding standard field remain marked as unmapped in the audit while their
+original columns and values are retained in `cleaned_data`; rates and video
+durations are not silently relabelled as different metrics. Formula values must have been calculated
+and saved by the spreadsheet application. No automatic overlap/deduplication across
+independent source files is performed.
 
 The standalone CLI is:
 
 ```bash
 python -m process.media_cleaner input.xlsx --no-ollama
+python -m process.media_cleaner input.xls --all-sheets --default-year 2025
 ```
+
+Run deterministic regressions with `python -m unittest discover -s tests`.
+`python -m tests.manual_validate_media_cleaner --output /tmp/media-validation`
+runs opt-in real-model layout variations and checks row counts and metric sums.
+Add `--source <directory>` to test private workbooks; these are development data,
+not an independent generalization benchmark. Stubbed LLM tests validate the
+pipeline contract separately from real-model recognition quality.
 
 ## Update an existing Windows installation
 

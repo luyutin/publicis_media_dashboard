@@ -29,7 +29,7 @@ Placement	廣告版位
 SEM Status	搜尋關鍵字狀態
 Reach	觸及人數
 Impressions	曝光或展示次數
-Clicks (all)	全部點擊次數
+Clicks (all)	全部點擊次數、數量
 Frequency	廣告頻率
 Link clicks (Web Clicks)	連結或網站點擊次數
 Spent (TWD)	以新台幣計算的媒體花費
@@ -77,3 +77,4 @@ GA Session Qty	GA 工作階段數量
 TVR	電視收視率
 10 Second TVR	10 秒收視率
 Reach 000s	以千人為單位的觸及人數
+CTR 點擊率，百分比率

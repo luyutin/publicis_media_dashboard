@@ -1,7 +1,7 @@
 系統欄位定義：
 {target_descriptions}
 
-候選列（column 是 Excel 的 1-based 欄號；sample_rows 是其下方資料範例）：
+候選區塊（column 是 Excel 的絕對 1-based 欄號；sample_rows 的 values 從 start_column 起依序排列；表頭以 | 表示多層結構）：
 {options}
 
-選出一個 header_row。每個 target 最多對應一次；有效資料表至少要有兩個可信的 target 對應，不限定必須包含任何單一指標。
+請逐一處理所有 id，回傳 blocks 陣列。利用表頭、樣本和 context 辨識日期及欄位語意。known_mappings 是規則已確認的對應；請補足尚未對應的欄位。date_source 包含已確認的日期欄及實際樣本；它可能在本區塊欄範圍之外，由多張表共用，仍然是有效的日期維度，不必重新回傳 Date 對應。每個區塊必須能對應 Date，且有至少一個其他標準欄位，才可作為有效日期資料表。
